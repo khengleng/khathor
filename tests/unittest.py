@@ -15,7 +15,7 @@ from hathor.daa import TestMode, _set_test_mode
 from hathor.manager import HathorManager
 from hathor.p2p.peer_id import PeerId
 from hathor.p2p.sync_version import SyncVersion
-from hathor.transaction.storage.memory_storage import TransactionMemoryStorage
+from hathor.transaction.storage.rocksdb_storage import TransactionRocksDBStorage
 from hathor.util import Random
 from hathor.wallet import Wallet
 
@@ -123,7 +123,11 @@ class TestCase(unittest.TestCase):
             if unlock_wallet:
                 wallet.unlock(b'MYPASS')
         if tx_storage is None:
-            tx_storage = TransactionMemoryStorage()
+            # from hathor.transaction.storage.memory_storage import TransactionMemoryStorage
+            # tx_storage = TransactionMemoryStorage()
+            directory = tempfile.mkdtemp()
+            self.tmpdirs.append(directory)
+            tx_storage = TransactionRocksDBStorage(directory)
         manager = HathorManager(
             self.clock,
             peer_id=peer_id,

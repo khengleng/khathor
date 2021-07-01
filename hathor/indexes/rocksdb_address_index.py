@@ -12,30 +12,69 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections import defaultdict
-from typing import TYPE_CHECKING, DefaultDict, Iterable, List, Optional, Set
+from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Tuple
 
 from structlog import get_logger
 
+from hathor.indexes.address_index import AddressIndex
 from hathor.pubsub import HathorEvents
 from hathor.transaction import BaseTransaction
 from hathor.transaction.scripts import parse_address_script
 
 if TYPE_CHECKING:  # pragma: no cover
+    import rocksdb
+
     from hathor.pubsub import EventArguments, PubSubManager
     from hathor.transaction import TxOutput
 
 logger = get_logger()
 
+_CF_NAME_ADDRESS_INDEX = b'address-index'
 
-class AddressesIndex:
-    """ Index of inputs/outputs by address
+
+class RocksDBAddressIndex(AddressIndex):
+    """ Index of inputs/outputs by address.
+
+    This index uses rocksdb and the following key format:
+
+        key = [address][tx.timestamp][tx.hash]
+              |--34b--||--4 bytes---||--32b--|
+
+    It works nicely because rocksdb uses a tree sorted by key under the hoods.
+
+    The timestamp must be serialized in big-endian, so ts1 > ts2 implies that bytes(ts1) > bytes(ts2),
+    hence the transactions are sorted by timestamp.
     """
-    def __init__(self, pubsub: Optional['PubSubManager'] = None) -> None:
-        self.index: DefaultDict[str, Set[bytes]] = defaultdict(set)
+    def __init__(self, db: 'rocksdb.DB', *, cf_name: Optional[bytes] = None,
+                 pubsub: Optional['PubSubManager'] = None) -> None:
+        self._db = db
+        self._cf_name = cf_name or _CF_NAME_ADDRESS_INDEX
+        self._cf = self._db.get_column_family(self._cf_name)
         self.pubsub = pubsub
         if self.pubsub:
             self.subscribe_pubsub_events()
+
+    def _to_key(self, address: str, tx: Optional[BaseTransaction] = None) -> bytes:
+        import struct
+        assert len(address) == 34
+        key = address.encode('ascii')
+        if tx:
+            assert tx.hash is not None
+            assert len(tx.hash) == 32
+            key += struct.pack('>I', tx.timestamp) + tx.hash
+            assert len(key) == 34 + 4 + 32
+        return key
+
+    def _from_key(self, key: bytes) -> Tuple[str, int, bytes]:
+        import struct
+        assert len(key) == 34 + 4 + 32
+        address = key[:34].decode('ascii')
+        timestamp: int
+        (timestamp,) = struct.unpack('>I', key[34:38])
+        tx_hash = key[38:]
+        assert len(address) == 34
+        assert len(tx_hash) == 32
+        return address, timestamp, tx_hash
 
     def subscribe_pubsub_events(self) -> None:
         """ Subscribe wallet index to receive voided/winner tx pubsub events
@@ -86,7 +125,7 @@ class AddressesIndex:
 
         addresses = self._get_addresses(tx)
         for address in addresses:
-            self.index[address].add(tx.hash)
+            self._db.put((self._cf, self._to_key(address, tx)), b'')
 
         self.publish_tx(tx, addresses=addresses)
 
@@ -97,7 +136,7 @@ class AddressesIndex:
 
         addresses = self._get_addresses(tx)
         for address in addresses:
-            self.index[address].discard(tx.hash)
+            self._db.delete((self._cf, self._to_key(address, tx)))
 
     def handle_tx_event(self, key: HathorEvents, args: 'EventArguments') -> None:
         """ This method is called when pubsub publishes an event that we subscribed
@@ -108,15 +147,28 @@ class AddressesIndex:
         if meta.has_voided_by_changed_since_last_call() or meta.has_spent_by_changed_since_last_call():
             self.publish_tx(tx)
 
+    def _get_from_address_iter(self, address: str) -> Iterable[bytes]:
+        it = self._db.iterkeys(self._cf)
+        it.seek(self._to_key(address))
+        for key in it:
+            addr, _, tx_hash = self._from_key(key)
+            if addr != address:
+                break
+            yield tx_hash
+
     def get_from_address(self, address: str) -> List[bytes]:
         """ Get list of transaction hashes of an address
         """
-        return list(self.index[address])
+        return list(self._get_from_address_iter(address))
 
     def get_sorted_from_address(self, address: str) -> List[bytes]:
         """ Get a sorted list of transaction hashes of an address
         """
-        return sorted(self.index[address])
+        return list(self._get_from_address_iter(address))
 
     def is_address_empty(self, address: str) -> bool:
-        return not bool(self.index[address])
+        it = self._db.iterkeys(self._cf)
+        it.seek(self._to_key(address))
+        key = it.get()
+        addr, _, _ = self._from_key(key)
+        return addr == address

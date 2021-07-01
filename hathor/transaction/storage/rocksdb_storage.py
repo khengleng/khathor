@@ -15,6 +15,7 @@
 import os
 from typing import TYPE_CHECKING, Iterator, Optional
 
+from hathor.indexes import IndexesManager, RocksDBIndexesManager
 from hathor.transaction.storage.exceptions import TransactionDoesNotExist
 from hathor.transaction.storage.transaction_storage import BaseTransactionStorage
 from hathor.util import json_dumpb, json_loadb
@@ -82,6 +83,9 @@ class TransactionRocksDBStorage(BaseTransactionStorage):
         tx._metadata = TransactionMetadata.create_from_json(json_loadb(meta_data))
         tx.storage = self
         return tx
+
+    def _build_indexes_manager(self) -> IndexesManager:
+        return RocksDBIndexesManager(self._db)
 
     def _tx_to_bytes(self, tx: 'BaseTransaction') -> bytes:
         return bytes(tx)

@@ -240,7 +240,7 @@ class BaseTransactionStorageTest(unittest.TestCase):
         addresses_index = self.tx_storage.indexes.addresses
         addresses = addresses_index._get_addresses(tx)
         for address in addresses:
-            self.assertNotIn(tx.hash, addresses_index.index[address])
+            self.assertNotIn(tx.hash, addresses_index.get_from_address(address))
 
         # TODO Check self.tx_storage.tokens_index
 

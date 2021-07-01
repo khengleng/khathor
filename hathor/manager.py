@@ -149,7 +149,7 @@ class HathorManager:
         self.tx_storage.pubsub = self.pubsub
         if wallet_index and self.tx_storage.with_index:
             assert self.tx_storage.indexes is not None
-            self.tx_storage.indexes.enable_addresses_index(self.pubsub)
+            self.tx_storage.indexes.enable_address_index(self.pubsub)
             self.tx_storage.indexes.enable_tokens_index()
 
         self.metrics = Metrics(
@@ -300,7 +300,6 @@ class HathorManager:
             wait_stratum = self.stratum_factory.stop()
             if wait_stratum:
                 waits.append(wait_stratum)
-
         return defer.DeferredList(waits)
 
     def do_discovery(self) -> None:
