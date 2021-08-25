@@ -95,4 +95,5 @@ message Metadata {
   bytes first_block = 9;
   uint64 height = 10;
   uint32 validation = 11;
+  uint64 min_height = 12;
 }

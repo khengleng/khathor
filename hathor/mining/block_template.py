@@ -54,7 +54,7 @@ class BlockTemplate(NamedTuple):
         Note that if a timestamp is given it will be coerced into the [timestamp_min, timestamp_max] range.
         """
         # XXX: importing these here to try to contain hathor dependencies as much as possible
-        from hathor.transaction import TransactionMetadata, TxOutput
+        from hathor.transaction import TxOutput
         from hathor.transaction.scripts import create_output_script
 
         parents = list(self.get_random_parents(rng))
@@ -66,8 +66,7 @@ class BlockTemplate(NamedTuple):
         block = cls(outputs=tx_outputs, parents=parents, timestamp=block_timestamp,
                     data=data or b'', storage=storage, weight=self.weight)
         if include_metadata:
-            block._metadata = TransactionMetadata(height=self.height, score=self.score)
-        block.get_metadata(use_storage=False)
+            block.get_metadata(use_storage=False)
         return block
 
     def get_random_parents(self, rng: Random) -> Tuple[bytes, bytes, bytes]:

@@ -365,7 +365,7 @@ class HathorManager:
         self.log.debug('load blocks and transactions')
         for tx in self.tx_storage._topological_sort():
             if self._full_verification:
-                tx.update_initial_metadata()
+                tx.update_parents_children_metadata()
 
             assert tx.hash is not None
 
@@ -501,17 +501,18 @@ class HathorManager:
     def add_peer_discovery(self, peer_discovery: PeerDiscovery) -> None:
         self.peer_discoveries.append(peer_discovery)
 
-    def get_new_tx_parents(self, timestamp: Optional[float] = None) -> List[bytes]:
+    def get_new_tx_parents(self, timestamp: Optional[float] = None, height: Optional[int] = None) -> List[bytes]:
         """Select which transactions will be confirmed by a new transaction.
 
         :return: The hashes of the parents for a new transaction.
         :rtype: List[bytes(hash)]
         """
         timestamp = timestamp or self.reactor.seconds()
-        parent_txs = self.generate_parent_txs(timestamp)
+        height = height or self.tx_storage.get_height_best_block() + 1
+        parent_txs = self.generate_parent_txs(timestamp, height)
         return list(parent_txs.get_random_parents(self.rng))
 
-    def generate_parent_txs(self, timestamp: Optional[float]) -> 'ParentTxs':
+    def generate_parent_txs(self, timestamp: Optional[float], height: Optional[int]) -> 'ParentTxs':
         """Select which transactions will be confirmed by a new block.
 
         This method tries to return a stable result, such that for a given timestamp and storage state it will always
@@ -524,6 +525,22 @@ class HathorManager:
         max_timestamp = max(int(i.begin) for i in can_include_intervals)
         must_include: List[bytes] = []
         assert len(can_include_intervals) > 0, f'invalid timestamp "{timestamp}", no tips found"'
+        if height is not None:
+            orig_can_include_intervals = can_include_intervals[:]
+            # simply filter-out txs that don't meet our height restriction
+            for interval in orig_can_include_intervals:
+                tx_meta = self.tx_storage.get_transaction(interval.data).get_metadata()
+                if tx_meta.min_height > height:
+                    can_include_intervals.remove(interval)
+            # XXX: if that doesn't work ideally we would iterate over `orig_can_include` until we have a set that works
+            #      but less generally (probably), we can use an older interval that has higher chance to keep this
+            #      property but might miss valid tips, eventually the height should catch up, in practice this should
+            #      be avoided by rejecting txs (at API/mempool level) that would cause this problem (having a timestamp
+            #      high enough to be a tip at a time that the current best block isn't high enough to confirm the
+            #      transaction because the reward is still locked).
+            if not can_include_intervals:
+                new_timestamp = min(interval.begin for interval in orig_can_include_intervals)
+                return self.generate_parent_txs(new_timestamp, height)
         if len(can_include_intervals) < 2:
             # If there is only one tip, let's randomly choose one of its parents.
             must_include_interval = can_include_intervals[0]
@@ -574,8 +591,9 @@ class HathorManager:
         """ Makes a block template using the given parent block.
         """
         parent_block = self.tx_storage.get_transaction(parent_block_hash)
+        height = parent_block.get_metadata().height + 1
         assert isinstance(parent_block, Block)
-        parent_txs = self.generate_parent_txs(parent_block.timestamp + settings.MAX_DISTANCE_BETWEEN_BLOCKS)
+        parent_txs = self.generate_parent_txs(parent_block.timestamp + settings.MAX_DISTANCE_BETWEEN_BLOCKS, height)
         if timestamp is None:
             current_timestamp = int(max(self.tx_storage.latest_timestamp, self.reactor.seconds()))
         else:
@@ -773,7 +791,7 @@ class HathorManager:
             # This needs to be called right before the save because we were adding the children
             # in the tx parents even if the tx was invalid (failing the verifications above)
             # then I would have a children that was not in the storage
-            tx.update_initial_metadata()
+            tx.update_parents_children_metadata()
             self.tx_storage.save_transaction(tx, add_to_indexes=True)
             try:
                 self.consensus_algorithm.update(tx)
@@ -813,7 +831,7 @@ class HathorManager:
             # This needs to be called right before the save because we were adding the children
             # in the tx parents even if the tx was invalid (failing the verifications above)
             # then I would have a children that was not in the storage
-            tx.update_initial_metadata()
+            tx.update_parents_children_metadata()
             self.tx_storage.save_transaction(tx)
             self.tx_storage.add_to_deps_index(tx.hash, tx.get_all_dependencies())
             self.tx_storage.add_needed_deps(tx)
@@ -853,7 +871,7 @@ class HathorManager:
             self.tx_storage.remove_ready_for_validation(ready_tx.hash)
         for tx in map(self.tx_storage.get_transaction, self.tx_storage.next_ready_for_validation()):
             assert tx.hash is not None
-            tx.update_initial_metadata()
+            tx.update_parents_children_metadata()
             try:
                 assert tx.validate_full()
             except (AssertionError, HathorError):

@@ -2,6 +2,8 @@ import base64
 import hashlib
 from math import isinf, isnan
 
+import pytest
+
 from hathor.conf import HathorSettings
 from hathor.crypto.util import decode_address, get_address_from_public_key, get_private_key_from_bytes
 from hathor.daa import TestMode, _set_test_mode
@@ -790,22 +792,39 @@ class BaseTransactionTest(unittest.TestCase):
         self._test_txin_data_limit(offset=0)
 
     def test_reward_lock(self):
+        from hathor.exception import InvalidNewTransaction
         from hathor.transaction.exceptions import RewardLocked
 
         # add block with a reward we can spend
         reward_block = self.manager.generate_mining_block(address=get_address_from_public_key(self.genesis_public_key))
         reward_block.resolve()
         self.assertTrue(self.manager.propagate_tx(reward_block))
-        # reward cannot be spent while not enough blocks are added
-        for _ in range(settings.REWARD_SPEND_MIN_BLOCKS):
-            tx = self._spend_reward_tx(self.manager, reward_block)
-            with self.assertRaises(RewardLocked):
-                tx.verify()
-            add_new_blocks(self.manager, 1, advance_clock=1)
-        # now it should be spendable
-        tx = self._spend_reward_tx(self.manager, reward_block)
-        self.assertTrue(self.manager.propagate_tx(tx, fails_silently=False))
 
+        spend_reward_tx = self._spend_reward_tx(self.manager, reward_block)
+        self.manager.propagate_tx(spend_reward_tx)
+        self.clock.advance(2)
+
+        # tx cannot be added to a block while its height is not enough
+        for _ in range(settings.REWARD_SPEND_MIN_BLOCKS):
+            bad_block = self.manager.generate_mining_block()
+            bad_block.parents[1] = spend_reward_tx.hash
+            bad_block.resolve()
+            # should raise RewardLocked when validating directly
+            with self.assertRaises(RewardLocked):
+                bad_block.validate_full()
+            # will be converted to InvalidNewTransaction if not failing silently
+            with self.assertRaises(InvalidNewTransaction):
+                self.assertFalse(self.manager.propagate_tx(bad_block, fails_silently=False))
+            self.assertFalse(self.manager.propagate_tx(bad_block))
+            # now add a block normally (it must not include spend_reward_tx)
+            add_new_blocks(self.manager, 1, advance_clock=1)
+            self.assertIsNone(spend_reward_tx.get_metadata().first_block)
+
+        # now it can be included (and should naturally be picked up when generating a new block)
+        add_new_blocks(self.manager, 1, advance_clock=1)
+        self.assertIsNotNone(spend_reward_tx.get_metadata().first_block)
+
+    @pytest.mark.skip('timestamp makes no difference anymore')
     def test_reward_lock_timestamp(self):
         from hathor.transaction.exceptions import RewardLocked
 

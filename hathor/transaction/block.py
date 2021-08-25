@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import base64
+from itertools import chain
 from struct import pack
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -26,6 +27,7 @@ from hathor.transaction.exceptions import (
     BlockWithTokensError,
     CheckpointError,
     InvalidBlockReward,
+    RewardLocked,
     TransactionDataError,
     WeightError,
 )
@@ -137,6 +139,17 @@ class Block(BaseTransaction):
         assert self.storage is not None
         parent_block = self.get_block_parent()
         return parent_block.get_metadata().height + 1
+
+    def calculate_min_height(self) -> int:
+        """Same as height for a block.
+        """
+        assert self.storage is not None
+        return max(chain(
+            # 1) height of parent block + 1
+            [self.calculate_height()],
+            # 2) min height of any parent tx
+            (self.storage.get_transaction(tx).get_metadata().min_height for tx in self.get_tx_parents()),
+        ))
 
     def get_next_block_best_chain_hash(self) -> Optional[bytes]:
         """Return the hash of the next (child/left-to-right) block in the best blockchain.
@@ -311,6 +324,12 @@ class Block(BaseTransaction):
         if self.weight < block_weight - settings.WEIGHT_TOL:
             raise WeightError(f'Invalid new block {self.hash_hex}: weight ({self.weight}) is '
                               f'smaller than the minimum weight ({block_weight})')
+
+    def verify_height(self) -> None:
+        """Validate that the block height is enough to confirm all transactions being confirmed."""
+        meta = self.get_metadata()
+        if meta.height < meta.min_height:
+            raise RewardLocked(f'Block needs {meta.min_height} height but has {meta.height}')
 
     def verify_reward(self) -> None:
         """Validate reward amount."""
