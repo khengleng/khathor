@@ -67,10 +67,8 @@ class BaseHathorSyncMethodsTestCase(SimulatorTestCase):
             dot2 = GraphvizVisualizer(manager2.tx_storage, include_verifications=True).dot()
             dot2.render('dot2-post')
 
-        node_sync = conn12.proto1.state.sync_manager
-        self.assertEqual(node_sync.synced_timestamp, node_sync.peer_timestamp)
-        node_sync = conn12.proto2.state.sync_manager
-        self.assertEqual(node_sync.synced_timestamp, node_sync.peer_timestamp)
+        self.assertSynced(conn12.proto1.state.sync_manager)
+        self.assertSynced(conn12.proto2.state.sync_manager)
         self.assertTipsEqual(manager1, manager2)
         self.assertConsensusEqual(manager1, manager2)
         self.assertConsensusValid(manager1)
@@ -80,9 +78,15 @@ class BaseHathorSyncMethodsTestCase(SimulatorTestCase):
 class SyncV1HathorSyncMethodsTestCase(unittest.SyncV1Params, BaseHathorSyncMethodsTestCase):
     __test__ = True
 
+    def assertSynced(self, node_sync):
+        self.assertEqual(node_sync.synced_timestamp, node_sync.peer_timestamp)
+
 
 class SyncV2HathorSyncMethodsTestCase(unittest.SyncV2Params, BaseHathorSyncMethodsTestCase):
     __test__ = True
+
+    def assertSynced(self, node_sync):
+        self.assertEqual(node_sync.synced_height, node_sync.peer_height)
 
 
 # sync-bridge should behave like sync-v2

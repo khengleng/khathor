@@ -9,6 +9,7 @@ settings = HathorSettings()
 
 class BaseSoftVoidedTestCase(SimulatorTestCase):
     seed_config = 5988775361793628169
+    txA_hash: bytes  # to be set by test-case
 
     def assertNoParentsAreSoftVoided(self, tx):
         for h in tx.parents:
@@ -18,7 +19,7 @@ class BaseSoftVoidedTestCase(SimulatorTestCase):
             self.assertNotIn(settings.SOFT_VOIDED_ID, tx2_voided_by)
 
     def test_soft_voided(self):
-        txA_hash = bytes.fromhex('4586c5428e8d666ea59684c1cd9286d2b9d9e89b4939207db47412eeaabc48b2')
+        txA_hash = self.txA_hash
         soft_voided_tx_ids = set([
             txA_hash,
         ])
@@ -96,10 +97,12 @@ class BaseSoftVoidedTestCase(SimulatorTestCase):
 
 class SyncV1SoftVoidedTestCase(unittest.SyncV1Params, BaseSoftVoidedTestCase):
     __test__ = True
+    txA_hash = bytes.fromhex('4586c5428e8d666ea59684c1cd9286d2b9d9e89b4939207db47412eeaabc48b2')
 
 
 class SyncV2SoftVoidedTestCase(unittest.SyncV2Params, BaseSoftVoidedTestCase):
     __test__ = True
+    txA_hash = bytes.fromhex('dfdb8b5300c6eeadaffc27e3879d4cd2260cf74b66980bc91e203e174c66712f')
 
 
 # sync-bridge should behave like sync-v2

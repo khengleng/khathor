@@ -211,7 +211,7 @@ class TransactionStorage(ABC):
         else:
             cur_ready, self._txs_with_deps_ready = self._txs_with_deps_ready, set()
         while cur_ready:
-            yield from iter(cur_ready)
+            yield from sorted(cur_ready, key=lambda tx_hash: self.get_transaction(tx_hash).timestamp)
             if dry_run:
                 cur_ready = self._txs_with_deps_ready - cur_ready
             else:
@@ -277,6 +277,7 @@ class TransactionStorage(ABC):
                 block = self.get_transaction(first_block)
                 assert isinstance(block, Block)
                 height = block.get_metadata().height
+        self.log.debug('add needed deps', tx=tx.hash_hex, height=height, type=type(tx).__name__)
         # get_tx_parents is used instead of get_tx_dependencies because the remote will traverse the parent
         # tree, not # the dependency tree, eventually we should receive all tx dependencies and be able to validate
         # this transaction
@@ -284,6 +285,7 @@ class TransactionStorage(ABC):
             # It may happen that we have one of the dependencies already, so just add the ones we don't
             # have. We should add at least one dependency, otherwise this tx should be full validated
             if not self.transaction_exists(tx_hash):
+                self.log.debug('tx parent is needed', tx=tx_hash.hex())
                 self._needed_txs_index[tx_hash] = (height, not_none(tx.hash))
 
     # parent-blocks-index methods:

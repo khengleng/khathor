@@ -10,10 +10,12 @@ settings = HathorSettings()
 
 class BaseSoftVoidedTestCase(SimulatorTestCase):
     seed_config = 5988775361793628169
+    txA_hash: bytes  # to be set by test-case
+    txB_hash: bytes  # to be set by test-case
 
     def test_soft_voided(self):
-        txA_hash = bytes.fromhex('4586c5428e8d666ea59684c1cd9286d2b9d9e89b4939207db47412eeaabc48b2')
-        txB_hash = bytes.fromhex('d19bee149abdce63bbfd523c90c3cf110563970a34100b2a62583a1eba48dfc8')
+        txA_hash = self.txA_hash
+        txB_hash = self.txB_hash
         soft_voided_tx_ids = set([
             txA_hash,
             txB_hash,
@@ -33,7 +35,7 @@ class BaseSoftVoidedTestCase(SimulatorTestCase):
         manager2 = self.create_peer(soft_voided_tx_ids=soft_voided_tx_ids)
         manager2.soft_voided_tx_ids = soft_voided_tx_ids
 
-        self.graphviz = GraphvizVisualizer(manager2.tx_storage, include_verifications=True, include_funds=True)
+        graphviz = GraphvizVisualizer(manager2.tx_storage, include_verifications=True, include_funds=True)
 
         conn12 = FakeConnection(manager1, manager2, latency=0.001)
         self.simulator.add_connection(conn12)
@@ -55,7 +57,7 @@ class BaseSoftVoidedTestCase(SimulatorTestCase):
         txC.weight = 25
         txC.parents = tx_base.parents
         txC.update_hash()
-        self.graphviz.labels[txC.hash] = 'txC'
+        graphviz.labels[txC.hash] = 'txC'
         self.assertTrue(manager2.propagate_tx(txC, fails_silently=False))
         metaC = txC.get_metadata()
         self.assertIsNone(metaC.voided_by)
@@ -95,7 +97,8 @@ class BaseSoftVoidedTestCase(SimulatorTestCase):
         self.simulator.run(10)
         txD = add_custom_tx(manager2, [(txC, 0)], base_parent=txB)
 
-        # dot = self.graphviz.dot()
+        # Uncomment lines below to visualize the DAG and the blockchain.
+        # dot = graphviz.dot()
         # dot.render('dot0')
 
         blk3meta = blk3.get_metadata()
@@ -106,10 +109,14 @@ class BaseSoftVoidedTestCase(SimulatorTestCase):
 
 class SyncV1SoftVoidedTestCase(unittest.SyncV1Params, BaseSoftVoidedTestCase):
     __test__ = True
+    txA_hash = bytes.fromhex('4586c5428e8d666ea59684c1cd9286d2b9d9e89b4939207db47412eeaabc48b2')
+    txB_hash = bytes.fromhex('d19bee149abdce63bbfd523c90c3cf110563970a34100b2a62583a1eba48dfc8')
 
 
 class SyncV2SoftVoidedTestCase(unittest.SyncV2Params, BaseSoftVoidedTestCase):
     __test__ = True
+    txA_hash = bytes.fromhex('dfdb8b5300c6eeadaffc27e3879d4cd2260cf74b66980bc91e203e174c66712f')
+    txB_hash = bytes.fromhex('fc7763dd530963d3bec4e8d3069562e74aa6f1bb98e472afd70c266daae5d1f9')
 
 
 # sync-bridge should behave like sync-v2

@@ -18,6 +18,7 @@ import os
 import platform
 import sys
 from argparse import ArgumentParser, Namespace
+from itertools import chain
 from typing import Any, Callable, Dict, List, Tuple
 
 from autobahn.twisted.resource import WebSocketResource
@@ -274,7 +275,9 @@ class RunNode:
             self.manager.add_peer_discovery(DNSPeerDiscovery(dns_hosts))
 
         if args.bootstrap:
-            self.manager.add_peer_discovery(BootstrapPeerDiscovery(args.bootstrap))
+            # split each arg on ',', this allows using HATHOR_BOOTSTRAP=a,b,c
+            descriptions = [x.strip() for x in chain.from_iterable(x.split(',') for x in args.bootstrap)]
+            self.manager.add_peer_discovery(BootstrapPeerDiscovery(descriptions))
 
         if args.test_mode_tx_weight:
             _set_test_mode(TestMode.TEST_TX_WEIGHT)

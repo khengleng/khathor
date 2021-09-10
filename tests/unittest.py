@@ -106,15 +106,7 @@ class TestCase(unittest.TestCase):
     def create_peer(self, network, peer_id=None, wallet=None, tx_storage=None, unlock_wallet=True, wallet_index=False,
                     capabilities=None, full_verification=True, enable_sync_v1=None, enable_sync_v2=None,
                     checkpoints=None):
-        if enable_sync_v1 is None:
-            assert hasattr(self, '_enable_sync_v1'), ('`_enable_sync_v1` has no default by design, either set one on '
-                                                      'the test class or pass `enable_sync_v1` by argument')
-            enable_sync_v1 = self._enable_sync_v1
-        if enable_sync_v2 is None:
-            assert hasattr(self, '_enable_sync_v2'), ('`_enable_sync_v2` has no default by design, either set one on '
-                                                      'the test class or pass `enable_sync_v2` by argument')
-            enable_sync_v2 = self._enable_sync_v2
-        assert enable_sync_v1 or enable_sync_v2, 'enable at least one sync version'
+        enable_sync_v1, enable_sync_v2 = self._syncVersionFlags(enable_sync_v1, enable_sync_v2)
 
         if peer_id is None:
             peer_id = PeerId()
@@ -161,21 +153,86 @@ class TestCase(unittest.TestCase):
             amount = call.getTime() - self.clock.seconds()
             self.clock.advance(amount)
 
-    def assertTipsEqual(self, manager1, manager2):
-        s1 = set(manager1.tx_storage.get_all_tips())
-        s2 = set(manager2.tx_storage.get_all_tips())
-        self.assertEqual(s1, s2)
+    def _syncVersionFlags(self, enable_sync_v1=None, enable_sync_v2=None):
+        """Internal: use this to check and get the flags and optionally provide override values."""
+        if enable_sync_v1 is None:
+            assert hasattr(self, '_enable_sync_v1'), ('`_enable_sync_v1` has no default by design, either set one on '
+                                                      'the test class or pass `enable_sync_v1` by argument')
+            enable_sync_v1 = self._enable_sync_v1
+        if enable_sync_v2 is None:
+            assert hasattr(self, '_enable_sync_v2'), ('`_enable_sync_v2` has no default by design, either set one on '
+                                                      'the test class or pass `enable_sync_v2` by argument')
+            enable_sync_v2 = self._enable_sync_v2
+        assert enable_sync_v1 or enable_sync_v2, 'enable at least one sync version'
+        return enable_sync_v1, enable_sync_v2
 
-        s1 = set(manager1.tx_storage.get_tx_tips())
-        s2 = set(manager2.tx_storage.get_tx_tips())
-        self.assertEqual(s1, s2)
+    def assertTipsEqual(self, manager1, manager2):
+        _, enable_sync_v2 = self._syncVersionFlags()
+        if enable_sync_v2:
+            self.assertTipsEqualSyncV2(manager1, manager2)
+        else:
+            self.assertTipsEqualSyncV1(manager1, manager2)
 
     def assertTipsNotEqual(self, manager1, manager2):
         s1 = set(manager1.tx_storage.get_all_tips())
         s2 = set(manager2.tx_storage.get_all_tips())
         self.assertNotEqual(s1, s2)
 
+    def assertTipsEqualSyncV1(self, manager1, manager2):
+        # tx tips
+        self.assertEqual(manager1.tx_storage._mempool_tips_index, manager2.tx_storage._mempool_tips_index)
+
+        # best block
+        s1 = set(manager1.tx_storage.get_best_block_tips())
+        s2 = set(manager2.tx_storage.get_best_block_tips())
+        self.assertEqual(s1, s2)
+
+        # all tips must be equal (this check should be removed together with the index)
+        s1 = set(manager1.tx_storage.get_all_tips())
+        s2 = set(manager2.tx_storage.get_all_tips())
+        self.assertEqual(s1, s2)
+
+    def assertTipsEqualSyncV2(self, manager1, manager2):
+        # tx tips
+        tips1 = set(manager1.tx_storage._mempool_tips_index)
+        tips2 = set(manager2.tx_storage._mempool_tips_index)
+        self.log.debug('tx tips1', len=len(tips1), list=shorten_hash(tips1))
+        self.log.debug('tx tips2', len=len(tips2), list=shorten_hash(tips2))
+        # self.assertEqual(tips1, tips2)
+        # XXX: this is still not correct, tips may diverge since voided transactions aren't propagated
+        # XXX: temporarily disabled because tips may not match since sync-v2-mempool isn't merged yet
+        if len(tips1) < len(tips2):
+            self.assertEqual(tips1, tips1 & tips2)
+        else:
+            self.assertEqual(tips2, tips1 & tips2)
+
+        # best block
+        s1 = set(manager1.tx_storage.get_best_block_tips())
+        s2 = set(manager2.tx_storage.get_best_block_tips())
+        self.log.debug('block tips1', len=len(s1), list=shorten_hash(s1))
+        self.log.debug('block tips2', len=len(s2), list=shorten_hash(s2))
+        self.assertEqual(s1, s2)
+
+    def assertConsistentWinnersAndLosers(self, winners, losers, manager):
+        """ Basically checks that if a winning tx exist they are not voided and if loseing tx exist it is voided.
+        """
+        for tx in winners:
+            meta = manager.tx_storage.get_metadata(tx)
+            if meta is not None:
+                self.assertFalse(bool(meta.voided_by))
+        for tx in losers:
+            meta = manager.tx_storage.get_metadata(tx)
+            if meta is not None:
+                self.assertTrue(bool(meta.voided_by))
+
     def assertConsensusEqual(self, manager1, manager2):
+        _, enable_sync_v2 = self._syncVersionFlags()
+        if enable_sync_v2:
+            self.assertConsensusEqualSyncV2(manager1, manager2)
+        else:
+            self.assertConsensusEqualSyncV1(manager1, manager2)
+
+    def assertConsensusEqualSyncV1(self, manager1, manager2):
         self.assertEqual(manager1.tx_storage.get_count_tx_blocks(), manager2.tx_storage.get_count_tx_blocks())
         for tx1 in manager1.tx_storage.get_all_transactions():
             tx2 = manager2.tx_storage.get_transaction(tx1.hash)
@@ -193,6 +250,39 @@ class TestCase(unittest.TestCase):
                 self.assertGreaterEqual(len(tx2_meta.voided_by), 1)
             # Hard verification
             # self.assertEqual(tx1_meta.voided_by, tx2_meta.voided_by)
+
+    def assertConsensusEqualSyncV2(self, manager1, manager2):
+        # The current sync algorithm does not propagate voided blocks/txs
+        # so the count might be different even though the consensus is equal
+        # One peer might have voided txs that the other does not have
+
+        winners1 = set()
+        losers1 = set()
+        for tx1 in manager1.tx_storage.get_all_transactions():
+            tx1_meta = tx1.get_metadata()
+            if not tx1_meta.voided_by:
+                winners1.add(tx1.hash)
+            else:
+                losers1.add(tx1.hash)
+
+        winners2 = set()
+        losers2 = set()
+        for tx2 in manager2.tx_storage.get_all_transactions():
+            tx2_meta = tx2.get_metadata()
+            if not tx2_meta.voided_by:
+                winners2.add(tx2.hash)
+            else:
+                losers2.add(tx2.hash)
+
+        self.log.debug('peer1', height=manager1.tx_storage.get_height_best_block())
+        self.log.debug('peer2', height=manager2.tx_storage.get_height_best_block())
+        self.log.debug('winners1', len=len(winners1), extra=shorten_hash(winners1 - winners2))
+        self.log.debug('winners2', len=len(winners2), extra=shorten_hash(winners2 - winners1))
+
+        self.assertConsistentWinnersAndLosers(winners1, losers1, manager2)
+        self.assertConsistentWinnersAndLosers(winners2, losers2, manager1)
+
+        self.assertTipsEqualSyncV2(manager1, manager2)
 
     def assertConsensusValid(self, manager):
         for tx in manager.tx_storage.get_all_transactions():
