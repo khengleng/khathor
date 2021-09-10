@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections import deque
-from typing import TYPE_CHECKING, Deque
+from typing import TYPE_CHECKING, Deque, Optional
 
 from OpenSSL.crypto import X509
 from structlog import get_logger
@@ -158,9 +158,25 @@ class FakeConnection:
 
         return True
 
-    def run_until_complete(self, debug=False, force=False):
+    def _advance_reactors(self, dt: int) -> None:
+        reactor1 = self.manager1.reactor
+        reactor2 = self.manager2.reactor
+        if reactor1 is reactor2:
+            # both reactors are the same, only advance once
+            reactor1.advance(dt)
+        else:
+            # reactors are not the same, advance each one individually
+            reactor1.advance(dt)
+            reactor2.advance(dt)
+
+    def run_until_empty(self, max_steps: Optional[int] = None, debug: bool = False, force: bool = False) -> None:
+        steps = 0
         while not self.is_empty():
+            steps += 1
+            if max_steps is not None and steps > max_steps:
+                raise AssertionError('took more steps than expected')
             self.run_one_step(debug=debug, force=force)
+        self.log.debug('conn empty', steps=steps)
 
     def _deliver_message(self, proto, data, debug=False):
         proto.dataReceived(data)
