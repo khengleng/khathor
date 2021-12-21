@@ -68,7 +68,7 @@ class BaseTransactionStorageTest(unittest.TestCase):
         wallet.unlock(b'teste')
         self.manager = HathorManager(self.reactor, tx_storage=self.tx_storage, wallet=wallet)
 
-        self.tx_storage.indexes.enable_addresses_index(self.manager.pubsub)
+        self.tx_storage.indexes.enable_address_index(self.manager.pubsub)
         self.tx_storage.indexes.enable_tokens_index()
 
         block_parents = [tx.hash for tx in chain(self.genesis_blocks, self.genesis_txs)]
