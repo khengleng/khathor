@@ -181,7 +181,7 @@ class RocksDBAddressIndex(AddressIndex):
         self.log.debug('seek to', address=address)
         it = self._db.iterkeys(self._cf)
         it.seek(self._to_key(address))
-        for key in it:
+        for _cf, key in it:
             addr, _, tx_hash = self._from_key(key)
             if addr != address:
                 break
