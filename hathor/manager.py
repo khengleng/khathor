@@ -149,6 +149,7 @@ class HathorManager:
         self.tx_storage.pubsub = self.pubsub
         if wallet_index and self.tx_storage.with_index:
             assert self.tx_storage.indexes is not None
+            self.log.debug('enable wallet indexes')
             self.tx_storage.indexes.enable_address_index(self.pubsub)
             self.tx_storage.indexes.enable_tokens_index()
 

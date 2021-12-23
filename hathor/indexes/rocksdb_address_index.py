@@ -47,12 +47,40 @@ class RocksDBAddressIndex(AddressIndex):
     """
     def __init__(self, db: 'rocksdb.DB', *, cf_name: Optional[bytes] = None,
                  pubsub: Optional['PubSubManager'] = None) -> None:
+        self.log = logger.new()
         self._db = db
+
+        # column family stuff
         self._cf_name = cf_name or _CF_NAME_ADDRESS_INDEX
-        self._cf = self._db.get_column_family(self._cf_name)
+        self._reset_cf()
+
         self.pubsub = pubsub
         if self.pubsub:
             self.subscribe_pubsub_events()
+
+    def _reset_cf(self) -> None:
+        """Ensure we have a working and fresh column family"""
+        import rocksdb
+
+        log_cf = self.log.new(cf=self._cf_name.decode('ascii'))
+        _cf = self._db.get_column_family(self._cf_name)
+        # XXX: dropping column because initialization currently expects a fresh index
+        if _cf is not None:
+            old_id = _cf.id
+            log_cf.debug('drop existing column family')
+            self._db.drop_column_family(_cf)
+        else:
+            old_id = None
+            log_cf.debug('no need to drop column family')
+        del _cf
+        log_cf.debug('create fresh column family')
+        _cf = self._db.create_column_family(self._cf_name, rocksdb.ColumnFamilyOptions())
+        new_id = _cf.id
+        assert _cf is not None
+        assert _cf.is_valid
+        assert new_id != old_id
+        self._cf = _cf
+        log_cf.debug('got column family', is_valid=_cf.is_valid, id=_cf.id, old_id=old_id)
 
     def _to_key(self, address: str, tx: Optional[BaseTransaction] = None) -> bytes:
         import struct
@@ -125,6 +153,7 @@ class RocksDBAddressIndex(AddressIndex):
 
         addresses = self._get_addresses(tx)
         for address in addresses:
+            self.log.debug('put address', address=address)
             self._db.put((self._cf, self._to_key(address, tx)), b'')
 
         self.publish_tx(tx, addresses=addresses)
@@ -136,6 +165,7 @@ class RocksDBAddressIndex(AddressIndex):
 
         addresses = self._get_addresses(tx)
         for address in addresses:
+            self.log.debug('delete address', address=address)
             self._db.delete((self._cf, self._to_key(address, tx)))
 
     def handle_tx_event(self, key: HathorEvents, args: 'EventArguments') -> None:
@@ -148,13 +178,16 @@ class RocksDBAddressIndex(AddressIndex):
             self.publish_tx(tx)
 
     def _get_from_address_iter(self, address: str) -> Iterable[bytes]:
+        self.log.debug('seek to', address=address)
         it = self._db.iterkeys(self._cf)
         it.seek(self._to_key(address))
         for key in it:
             addr, _, tx_hash = self._from_key(key)
             if addr != address:
                 break
+            self.log.debug('seek found', tx=tx_hash.hex())
             yield tx_hash
+        self.log.debug('seek end')
 
     def get_from_address(self, address: str) -> List[bytes]:
         """ Get list of transaction hashes of an address
@@ -167,8 +200,11 @@ class RocksDBAddressIndex(AddressIndex):
         return list(self._get_from_address_iter(address))
 
     def is_address_empty(self, address: str) -> bool:
+        self.log.debug('seek to', address=address)
         it = self._db.iterkeys(self._cf)
         it.seek(self._to_key(address))
         key = it.get()
         addr, _, _ = self._from_key(key)
-        return addr == address
+        is_empty = addr == address
+        self.log.debug('seek empty', is_empty=is_empty)
+        return is_empty
