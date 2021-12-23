@@ -13,11 +13,14 @@
 # limitations under the License.
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import TYPE_CHECKING, Iterable, List, Optional
 
 from structlog import get_logger
 
 from hathor.transaction import BaseTransaction
+
+if TYPE_CHECKING:  # pragma: no cover
+    from hathor.pubsub import PubSubManager
 
 logger = get_logger()
 
@@ -25,6 +28,20 @@ logger = get_logger()
 class AddressIndex(ABC):
     """ Index of inputs/outputs by address
     """
+    pubsub: Optional['PubSubManager']
+
+    def publish_tx(self, tx: BaseTransaction, *, addresses: Optional[Iterable[str]] = None) -> None:
+        """ Publish WALLET_ADDRESS_HISTORY for all addresses of a transaction.
+        """
+        from hathor.pubsub import HathorEvents
+        if not self.pubsub:
+            return
+        if addresses is None:
+            addresses = tx.get_related_addresses()
+        data = tx.to_json_extended()
+        for address in addresses:
+            self.pubsub.publish(HathorEvents.WALLET_ADDRESS_HISTORY, address=address, history=data)
+
     @abstractmethod
     def add_tx(self, tx: BaseTransaction) -> None:
         """ Add tx inputs and outputs to the wallet index (indexed by its addresses).

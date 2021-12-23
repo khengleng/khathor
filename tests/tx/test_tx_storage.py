@@ -238,7 +238,7 @@ class BaseTransactionStorageTest(unittest.TestCase):
 
         # Check wallet index.
         addresses_index = self.tx_storage.indexes.addresses
-        addresses = addresses_index._get_addresses(tx)
+        addresses = tx.get_related_addresses()
         for address in addresses:
             self.assertNotIn(tx.hash, addresses_index.get_from_address(address))
 
