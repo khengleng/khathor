@@ -19,6 +19,7 @@ from structlog import get_logger
 
 from hathor.indexes.address_index import AddressIndex
 from hathor.indexes.memory_address_index import MemoryAddressIndex
+from hathor.indexes.memory_tokens_index import MemoryTokensIndex
 from hathor.indexes.rocksdb_address_index import RocksDBAddressIndex
 from hathor.indexes.timestamp_index import TimestampIndex
 from hathor.indexes.tips_index import TipsIndex
@@ -99,7 +100,7 @@ class MemoryIndexesManager(IndexesManager):
     def enable_tokens_index(self) -> None:
         """Enable tokens index."""
         if self.tokens is None:
-            self.tokens = TokensIndex()
+            self.tokens = MemoryTokensIndex()
 
     def add_tx(self, tx: BaseTransaction) -> bool:
         """ Add a transaction to the indexes
